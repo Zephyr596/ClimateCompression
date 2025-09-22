@@ -1,0 +1,41 @@
+# Python cache & virtualenv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+.env/
+.venv/
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# C++ build
+cpp/build/
+*.o
+*.out
+*.exe
+
+# TileDB arrays (each stored as folder)
+*.tiledb/
+tiledb_arrays/
+
+# Data files (large climate dataset & generated data)
+data/*.bin
+data/*.npy
+data/*.npz
+data/*.h5
+data/*.zarr
+data/*.tar
+data/*.zip
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
