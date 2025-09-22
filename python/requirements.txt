@@ -1,0 +1,5 @@
+tiledb
+numpy
+scipy
+gdown
+matplotlib
