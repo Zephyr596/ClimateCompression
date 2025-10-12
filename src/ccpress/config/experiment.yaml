@@ -14,7 +14,7 @@ tiledb:
 
 semantic_compression:
   algorithm: "svd"
-  rank: 50          # r值 for SVD
+  rank: 20          # r值 for SVD
   epsilon: 1e-3     # 误差约束
 
 evaluation:
