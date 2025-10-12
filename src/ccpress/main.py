@@ -5,7 +5,7 @@ from ccpress.config import Config
 from ccpress.utils import setup_logger, path_size_bytes
 from ccpress.utils.yaml_io import load_yaml, save_yaml
 from ccpress.data import load_dat_as_memmap, raw_file_size
-from ccpress.compression import TileDBCompressor
+from ccpress.compression import TileDBStore
 from ccpress.evaluation import compression_ratio, mse_psnr_streaming
 
 # semantic compressor (SVD etc.)
@@ -37,7 +37,7 @@ def run_pipeline(cfg_file: str):
 
     # === Step 2: Write raw D → TileDB (arrayD) ===
     arrayD_uri = cfg.make_array_uri()
-    td_comp = TileDBCompressor(
+    td_store = TileDBStore(
         array_uri=arrayD_uri,
         shape=shape,
         dtype=dtype,
@@ -46,7 +46,7 @@ def run_pipeline(cfg_file: str):
         tile=tuple(td["tile"]),
         overwrite=td["overwrite"],
     )
-    td_comp.write(src, block_t=td["tile"][0])
+    td_store.write(src, block0=td["tile"][0])
     logger.info(f"Stored arrayD → {arrayD_uri}")
 
     # === Step 3: Semantic compression (G) ===
@@ -67,20 +67,32 @@ def run_pipeline(cfg_file: str):
     arrayG_uri = arrayD_uri.replace("arrayD", "arrayG")
     arrayE_uri = arrayD_uri.replace("arrayD", "arrayE")
 
-    td_G = TileDBCompressor(array_uri=arrayG_uri, shape=G.shape, dtype=str(G.dtype),
+    U, S, Vt = G
+    tile_map = {
+        "U":  None,  # 默认自动 tile
+        "S":  None,
+        "Vt": (min(256, Vt.shape[0]), min(8192, Vt.shape[1])),
+    }
+    g_uris = TileDBStore.save_parts(
+        base_uri=arrayG_uri,
+        parts={"U": U, "S": S, "Vt": Vt},
+        codec=td["codec"], level=td["level"],
+        tile_map=tile_map, overwrite=True
+    )
+
+    # td_G = TileDBStore(array_uri=arrayG_uri, shape=G.shape, dtype=str(G.dtype),
+    #                         compressor_name=td["codec"], compression_level=td["level"],
+    #                         tile=tuple(td["tile"]), overwrite=True)
+    td_E = TileDBStore(array_uri=arrayE_uri, shape=E.shape, dtype=str(E.dtype),
                             compressor_name=td["codec"], compression_level=td["level"],
                             tile=tuple(td["tile"]), overwrite=True)
-    td_E = TileDBCompressor(array_uri=arrayE_uri, shape=E.shape, dtype=str(E.dtype),
-                            compressor_name=td["codec"], compression_level=td["level"],
-                            tile=tuple(td["tile"]), overwrite=True)
-    td_G.write(G)
-    td_E.write(E)
+    td_E.write(E, block0=td["tile"][0])
     logger.info(f"Stored arrayG and arrayE.")
 
     # === Step 6: Evaluate ===
     # raw_bytes = raw_file_size(dat_path)
     size_D = path_size_bytes(arrayD_uri)
-    size_G = path_size_bytes(arrayG_uri)
+    size_G = sum(path_size_bytes(uri) for uri in g_uris.values())
     size_E = path_size_bytes(arrayE_uri)
     rho = compression_ratio(size_D, size_G + size_E)
     mse, psnr = mse_psnr_streaming(src, lambda s: D_corrected[s], shape, block_t=td["tile"][0])

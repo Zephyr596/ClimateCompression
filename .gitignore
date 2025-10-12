@@ -20,6 +20,10 @@ __MACOSX/
 # Large data files
 data/raw/
 data/arrayD/
+data/arrayE/
+data/arrayG/
+
+results
 
 # Logs & temp
 *.log
