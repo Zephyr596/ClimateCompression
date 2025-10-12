@@ -18,13 +18,7 @@ cpp/build/
 __MACOSX/
 
 # Large data files
-data/*.zip
-data/*.dat
-data/*.bin
-data/*.npy
-data/*.npz
-data/*.h5
-data/*.tiledb/
+data/raw/
 data/arrayD/
 
 # Logs & temp

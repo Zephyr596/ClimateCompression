@@ -1,0 +1,21 @@
+experiment:
+  name: svd_eps1e-3_tile32x128x128
+  output_dir: results/
+
+dataset:
+  version: "500"
+  dtype: "float32"
+
+tiledb:
+  codec: "zstd"
+  level: 7
+  tile: [32, 128, 128]
+  overwrite: true
+
+semantic_compression:
+  algorithm: "svd"
+  rank: 50          # r值 for SVD
+  epsilon: 1e-3     # 误差约束
+
+evaluation:
+  metrics: ["compression_ratio", "mse", "psnr"]
