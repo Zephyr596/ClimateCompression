@@ -19,12 +19,26 @@ __MACOSX/
 
 # Large data files
 data/raw/
-data/arrayD/
-data/arrayE/
-data/arrayG/
+data/**/*.dat
+*.dat
 
-results
+data/*
+
+!data/*/results/
+!data/*/results/*.yaml
+
+data/*/arrayD/
+data/*/arrayG/
+data/*/arrayE/
+
+*.npy
+*.npz
+*.pt
+*.pth
+*.onnx
+
 
 # Logs & temp
 *.log
 *.tmp
+ccpress/config/local/

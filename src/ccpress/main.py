@@ -1,52 +1,46 @@
+# ccpress/main.py
 from __future__ import annotations
 import numpy as np
 from pathlib import Path
 from ccpress.config import Config
 from ccpress.utils import setup_logger, path_size_bytes
 from ccpress.utils.yaml_io import load_yaml, save_yaml
-from ccpress.data import load_dat_as_memmap, raw_file_size
-from ccpress.compression import TileDBStore
+from ccpress.data import load_dat_as_memmap
+from ccpress.compression import TileDBStore, SVDCompressor, ErrorCorrector
 from ccpress.evaluation import compression_ratio, mse_psnr_streaming
 
-# semantic compressor (SVD etc.)
-from ccpress.compression import SVDCompressor
-from ccpress.compression import ErrorCorrector
-
-
 def run_pipeline(cfg_file: str):
-    # === Load configuration ===
     cfg_dict = load_yaml(cfg_file)
     cfg = Config()
     logger = setup_logger()
 
-    # === Extract parameters ===
     exp = cfg_dict["experiment"]
-    ds = cfg_dict["dataset"]
-    td = cfg_dict["tiledb"]
+    ds  = cfg_dict["dataset"]
+    td  = cfg_dict["tiledb"]
     sem = cfg_dict["semantic_compression"]
 
-    logger.info(f"Running experiment: {exp['name']}")
+    exp_name   = exp["name"]                 # e.g. "svd_eps1e-3_tile32x128x128"
+    ds_version = ds["version"]               # "500" 或 "4k"
+    codec      = td["codec"]                 # "zstd" / "lz4"
+    level      = td["level"]                 # 7
+    tile       = tuple(td["tile"])           # (32,128,128)
+
+    logger.info(f"Running experiment: {exp_name}")
 
     # === Step 1: Load dataset ===
-    meta = cfg.datasets[ds["version"]]
+    meta = cfg.datasets[ds_version]
     dat_path = cfg.data_raw_dir / meta["file"]
     shape = tuple(meta["shape"])
-    dtype = meta["dtype"]
+    dtype = np.dtype(meta["dtype"])
     src = load_dat_as_memmap(dat_path, shape=shape, dtype=dtype)
     logger.info(f"Loaded dataset: {dat_path.name}, shape={shape}")
 
-    # === Step 2: Write raw D → TileDB (arrayD) ===
-    arrayD_uri = cfg.make_array_uri()
-    td_store = TileDBStore(
-        array_uri=arrayD_uri,
-        shape=shape,
-        dtype=dtype,
-        compressor_name=td["codec"],
-        compression_level=td["level"],
-        tile=tuple(td["tile"]),
-        overwrite=td["overwrite"],
-    )
-    td_store.write(src, block0=td["tile"][0])
+    # === Step 2: D → TileDB ===
+    arrayD_uri = cfg.make_arrayD_uri(exp_name, ds_version, codec, level, tile)
+    td_store = TileDBStore(array_uri=arrayD_uri, shape=shape, dtype=dtype,
+                           compressor_name=codec, compression_level=level,
+                           tile=tile, overwrite=td["overwrite"])
+    td_store.write(src, block0=tile[0])
     logger.info(f"Stored arrayD → {arrayD_uri}")
 
     # === Step 3: Semantic compression (G) ===
@@ -54,6 +48,7 @@ def run_pipeline(cfg_file: str):
         compressor = SVDCompressor(rank=sem["rank"])
         G = compressor.compress(src)
         D_approx = compressor.decompress(G)
+        g_base_uri = cfg.make_arrayG_base(exp_name, "svd", rank=sem["rank"])
     else:
         raise ValueError(f"Unknown algorithm: {sem['algorithm']}")
 
@@ -63,50 +58,49 @@ def run_pipeline(cfg_file: str):
     D_corrected = D_approx + E
     logger.info(f"Computed correction matrix E (ε={sem['epsilon']})")
 
-    # === Step 5: Store G/E as TileDB arrays ===
-    arrayG_uri = arrayD_uri.replace("arrayD", "arrayG")
-    arrayE_uri = arrayD_uri.replace("arrayD", "arrayE")
-
+    # === Step 5: Store G (U/S/Vt) & E ===
     U, S, Vt = G
     tile_map = {
-        "U":  None,  # 默认自动 tile
+        "U":  None,
         "S":  None,
         "Vt": (min(256, Vt.shape[0]), min(8192, Vt.shape[1])),
     }
     g_uris = TileDBStore.save_parts(
-        base_uri=arrayG_uri,
+        base_uri=g_base_uri,
         parts={"U": U, "S": S, "Vt": Vt},
-        codec=td["codec"], level=td["level"],
-        tile_map=tile_map, overwrite=True
+        codec=codec, level=level, tile_map=tile_map, overwrite=True
     )
 
-    # td_G = TileDBStore(array_uri=arrayG_uri, shape=G.shape, dtype=str(G.dtype),
-    #                         compressor_name=td["codec"], compression_level=td["level"],
-    #                         tile=tuple(td["tile"]), overwrite=True)
-    td_E = TileDBStore(array_uri=arrayE_uri, shape=E.shape, dtype=str(E.dtype),
-                            compressor_name=td["codec"], compression_level=td["level"],
-                            tile=tuple(td["tile"]), overwrite=True)
-    td_E.write(E, block0=td["tile"][0])
-    logger.info(f"Stored arrayG and arrayE.")
+    arrayE_uri = cfg.make_arrayE_uri(exp_name, epsilon=sem["epsilon"], codec=codec, level=level)
+    td_E = TileDBStore(array_uri=arrayE_uri, shape=E.shape, dtype=E.dtype,
+                       compressor_name=codec, compression_level=level,
+                       tile=tile, overwrite=True)
+    td_E.write(E, block0=tile[0])
+    logger.info(f"Stored arrayG parts → {g_uris} and arrayE → {arrayE_uri}")
 
     # === Step 6: Evaluate ===
-    # raw_bytes = raw_file_size(dat_path)
     size_D = path_size_bytes(arrayD_uri)
     size_G = sum(path_size_bytes(uri) for uri in g_uris.values())
     size_E = path_size_bytes(arrayE_uri)
     rho = compression_ratio(size_D, size_G + size_E)
-    mse, psnr = mse_psnr_streaming(src, lambda s: D_corrected[s], shape, block_t=td["tile"][0])
+    mse, psnr = mse_psnr_streaming(src, lambda s: D_corrected[s], shape, block_t=tile[0])
     logger.info(f"Compression ratio ρ = {rho:.3f}, MSE={mse:.6e}, PSNR={psnr:.2f}")
 
     # === Step 7: Save results ===
-    out_dir = Path(exp["output_dir"]) / exp["name"]
-    out_dir.mkdir(parents=True, exist_ok=True)
-    result_file = out_dir / "results.yaml"
+    results_dir = cfg.results_dir(exp_name)
+    result_file = results_dir / "results.yaml"
     save_yaml({
-        "experiment": exp["name"],
+        "experiment": exp_name,
+        "dataset_version": ds_version,
         "rho": float(rho),
         "mse": float(mse),
         "psnr": float(psnr),
+        "paths": {
+            "arrayD": arrayD_uri,
+            "arrayG": g_uris,           # dict: {"U": "...", "S": "...", "Vt": "..."}
+            "arrayE": arrayE_uri,
+            "results_dir": str(results_dir),
+        },
         "config": cfg_dict,
     }, result_file)
     logger.info(f"Results saved to {result_file}")
