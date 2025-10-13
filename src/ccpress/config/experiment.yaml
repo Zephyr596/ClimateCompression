@@ -1,5 +1,6 @@
 experiment:
-  name: svd_eps1e-2_tile32x128x128
+  # 留空则会自动根据算法、epsilon、tile 等信息组合名称
+  name: null
   output_dir: results/
 
 dataset:
@@ -13,19 +14,18 @@ tiledb:
   overwrite: true
 
 semantic_compression:
-  # algorithm: "svd"
-  # rank: 20          # r值 for SVD
-  # epsilon: 1e-2     # 误差约束
-  # 若使用 randomized SVD:
-  # algorithm: "rsvd"
-  # oversampling: 10
-  # n_iter: 2
-  # epsilon: 1e-3 
-  若使用 Tucker/HOSVD:
   algorithm: "tucker"
-  ranks: [20, 40, 40]
-  epsilon: 1e-3 
-  # === 新增: E 的相关配置 ===
+  epsilon: 1e-3
+  algorithms:
+    svd:
+      rank: 20          # r值 for SVD
+    rsvd:
+      rank: 20
+      oversampling: 10
+      n_iter: 2
+    tucker:
+      ranks: [20, 40, 40]
+  # === E 的相关配置 ===
   error_correction:
     enable: true           # 是否启用E计算（关闭则只保留G）
     mode: "blockwise"      # 可选: "pointwise", "blockwise", "quantized"
@@ -33,4 +33,8 @@ semantic_compression:
     dtype: "float32"       # 或 "int8" (用于 quantized)
 
 evaluation:
-  metrics: ["compression_ratio", "mse", "psnr"]
+  metrics: ["compression_ratio"]
+
+sweep:
+  algorithms: ["svd", "tucker"]
+  epsilons: [1e-4, 1e-3, 1e-2]
