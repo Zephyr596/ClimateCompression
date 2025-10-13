@@ -87,10 +87,29 @@ def run_pipeline(cfg_file: str):
     D_approx = compressor.decompress(G)
 
     # === Step 4: Error correction (E) ===
-    corrector = ErrorCorrector(epsilon=sem["epsilon"])
-    E = corrector.compute(src, D_approx)
-    D_corrected = D_approx + E
-    logger.info(f"Computed correction matrix E (ε={sem['epsilon']})")
+    ec_cfg = sem.get("error_correction", {"enable": True})
+    if ec_cfg.get("enable", True):
+        mode = ec_cfg.get("mode", "blockwise")
+        block_size = int(ec_cfg.get("block_size", 8))
+        dtype_str = ec_cfg.get("dtype", "float32")
+        dtype = np.dtype(dtype_str)
+
+        corrector = ErrorCorrector(
+            epsilon=sem["epsilon"],
+            mode=mode,
+            block_size=block_size,
+            dtype=dtype,
+        )
+        E = corrector.compute(src, D_approx)
+        D_corrected = D_approx + (
+            E.astype(D_approx.dtype) if E.dtype != D_approx.dtype else E
+        )
+        logger.info(f"Computed correction matrix E (ε={sem['epsilon']}, mode={mode})")
+    else:
+        logger.info("Skipping error correction (E disabled).")
+        E = np.zeros_like(src)
+        D_corrected = D_approx
+
 
     # === Step 5: Store G (U/S/Vt) & E ===
     tile_map = sem.get("tile_map")
