@@ -1,5 +1,7 @@
 """Streamlit GUI for sweeping ClimateCompression experiments."""
 from __future__ import annotations
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from copy import deepcopy
 from datetime import datetime
