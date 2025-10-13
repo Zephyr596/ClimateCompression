@@ -3,6 +3,9 @@ from __future__ import annotations
 import numpy as np
 from pathlib import Path
 from ccpress.config import Config
+from copy import deepcopy
+from typing import Any, Dict
+
 from ccpress.utils import setup_logger, path_size_bytes
 from ccpress.utils.yaml_io import load_yaml, save_yaml
 from ccpress.data import load_dat_as_memmap
@@ -15,17 +18,78 @@ from ccpress.compression import (
 )
 from ccpress.evaluation import compression_ratio, mse_psnr_streaming
 
-def run_pipeline(cfg_file: str):
-    cfg_dict = load_yaml(cfg_file)
+
+def _format_float(value: float) -> str:
+    """Format floats for naming/logging (avoid long scientific notation)."""
+    if value is None:
+        return ""
+    if value == 0:
+        return "0"
+    if abs(value) >= 1:
+        return f"{value:.3g}".rstrip("0").rstrip(".")
+    return f"{value:.0e}".replace("e-0", "e-").replace("e+0", "e+")
+
+
+def generate_experiment_name(exp_cfg: Dict[str, Any], ds_cfg: Dict[str, Any],
+                             td_cfg: Dict[str, Any], sem_cfg: Dict[str, Any]) -> str:
+    """Automatically compose experiment names when not provided explicitly."""
+    name = exp_cfg.get("name")
+    if name:
+        return name
+
+    parts: list[str] = []
+    version = ds_cfg.get("version")
+    if version:
+        parts.append(str(version))
+
+    algo = sem_cfg.get("algorithm")
+    if algo:
+        parts.append(algo.lower())
+
+    epsilon = sem_cfg.get("epsilon")
+    if epsilon is not None:
+        parts.append(f"eps{_format_float(float(epsilon))}")
+
+    algo_cfg = sem_cfg.get("algorithms", {})
+    if isinstance(algo_cfg, dict) and algo in algo_cfg:
+        params = algo_cfg.get(algo) or {}
+    else:
+        params = sem_cfg
+
+    if algo in {"svd", "rsvd", "randomized_svd"}:
+        rank = params.get("rank") or sem_cfg.get("rank")
+        if rank:
+            parts.append(f"r{rank}")
+    elif algo == "tucker":
+        ranks = params.get("ranks") or sem_cfg.get("ranks")
+        if ranks:
+            parts.append("x".join(str(r) for r in ranks))
+
+    tile = td_cfg.get("tile")
+    if tile:
+        if isinstance(tile, (list, tuple)):
+            parts.append("tile" + "x".join(str(int(v)) for v in tile))
+        else:
+            parts.append(f"tile{tile}")
+
+    codec = td_cfg.get("codec")
+    if codec:
+        parts.append(codec)
+
+    return "_".join(parts) if parts else "experiment"
+
+def run_experiment(cfg_dict: Dict[str, Any], *, logger=None) -> Dict[str, Any]:
     cfg = Config()
-    logger = setup_logger()
+    logger = logger or setup_logger()
+
+    cfg_dict = deepcopy(cfg_dict)
 
     exp = cfg_dict["experiment"]
     ds  = cfg_dict["dataset"]
     td  = cfg_dict["tiledb"]
     sem = cfg_dict["semantic_compression"]
 
-    exp_name   = exp["name"]                 # e.g. "svd_eps1e-3_tile32x128x128"
+    exp_name   = generate_experiment_name(exp, ds, td, sem)
     ds_version = ds["version"]               # "500" 或 "4k"
     codec      = td["codec"]                 # "zstd" / "lz4"
     level      = td["level"]                 # 7
@@ -51,16 +115,21 @@ def run_pipeline(cfg_file: str):
 
     # === Step 3: Semantic compression (G) ===
     algo = sem["algorithm"].lower()
+    algo_cfg = sem.get("algorithms", {}) if isinstance(sem, dict) else {}
+    algo_params = {}
+    if isinstance(algo_cfg, dict) and algo in algo_cfg:
+        algo_params = algo_cfg.get(algo) or {}
+
     if algo == "svd":
-        rank = int(sem.get("rank", 50))
+        rank = int(algo_params.get("rank", sem.get("rank", 50)))
         compressor = SVDCompressor(rank=rank)
         g_base_uri = cfg.make_arrayG_base(exp_name, compressor.name,
                                           rank=rank,
                                           suffix=sem.get("suffix"))
     elif algo in {"rsvd", "randomized_svd"}:
-        rank = int(sem.get("rank", 50))
-        oversampling = int(sem.get("oversampling", 10))
-        n_iter = int(sem.get("n_iter", 2))
+        rank = int(algo_params.get("rank", sem.get("rank", 50)))
+        oversampling = int(algo_params.get("oversampling", sem.get("oversampling", 10)))
+        n_iter = int(algo_params.get("n_iter", sem.get("n_iter", 2)))
         compressor = RandomizedSVDCompressor(
             rank=rank,
             oversampling=oversampling,
@@ -73,7 +142,8 @@ def run_pipeline(cfg_file: str):
         g_base_uri = cfg.make_arrayG_base(exp_name, compressor.name,
                                           rank=rank, suffix=suffix)
     elif algo == "tucker":
-        ranks = tuple(int(v) for v in sem.get("ranks", (20, 40, 40)))
+        ranks_cfg = algo_params.get("ranks", sem.get("ranks", (20, 40, 40)))
+        ranks = tuple(int(v) for v in ranks_cfg)
         compressor = TuckerCompressor(ranks=ranks)
         suffix = sem.get("suffix")
         if suffix is None:
@@ -148,12 +218,40 @@ def run_pipeline(cfg_file: str):
     logger.info(f"Stored arrayG parts → {g_uris} and arrayE → {arrayE_uri}")
 
     # === Step 6: Evaluate ===
-    size_D = path_size_bytes(arrayD_uri)
-    size_G = sum(path_size_bytes(uri) for uri in g_uris.values())
-    size_E = path_size_bytes(arrayE_uri)
-    rho = compression_ratio(size_D, size_G + size_E)
-    mse, psnr = mse_psnr_streaming(src, lambda s: D_corrected[s], shape, block_t=tile[0])
-    logger.info(f"Compression ratio ρ = {rho:.3f}, MSE={mse:.6e}, PSNR={psnr:.2f}")
+    eval_cfg = cfg_dict.get("evaluation", {})
+    metrics = eval_cfg.get("metrics") or ["compression_ratio"]
+    metrics = [m.lower() for m in metrics]
+    metrics = list(dict.fromkeys(metrics))  # 去重并保持顺序
+
+    metric_results: Dict[str, float] = {}
+    log_parts = []
+
+    if "compression_ratio" in metrics:
+        raw_elems = int(np.prod(shape, dtype=np.int64))
+        raw_bytes = raw_elems * dtype.itemsize
+        size_G = sum(path_size_bytes(uri) for uri in g_uris.values())
+        size_E = path_size_bytes(arrayE_uri)
+        compressed_bytes = size_G + size_E
+        rho = compression_ratio(raw_bytes, compressed_bytes)
+        metric_results["compression_ratio"] = float(rho)
+        log_parts.append(
+            f"ρ={rho:.3f} (raw={raw_bytes:,} B, compressed={compressed_bytes:,} B)"
+        )
+
+    need_mse = any(m in {"mse", "psnr"} for m in metrics)
+    if need_mse:
+        mse, psnr = mse_psnr_streaming(src, lambda s: D_corrected[s], shape, block_t=tile[0])
+        if "mse" in metrics:
+            metric_results["mse"] = float(mse)
+            log_parts.append(f"MSE={mse:.6e}")
+        if "psnr" in metrics:
+            metric_results["psnr"] = float(psnr)
+            log_parts.append(f"PSNR={psnr:.2f}")
+
+    if log_parts:
+        logger.info("Metrics: " + ", ".join(log_parts))
+    else:
+        logger.info("No evaluation metrics requested; skipping metrics computation.")
 
     # === Step 7: Save results ===
     results_dir = cfg.results_dir(exp_name)
@@ -161,9 +259,7 @@ def run_pipeline(cfg_file: str):
     save_yaml({
         "experiment": exp_name,
         "dataset_version": ds_version,
-        "rho": float(rho),
-        "mse": float(mse),
-        "psnr": float(psnr),
+        "metrics": metric_results,
         "paths": {
             "arrayD": arrayD_uri,
             "arrayG": g_uris,           # dict: {"U": "...", "S": "...", "Vt": "..."}
@@ -173,6 +269,27 @@ def run_pipeline(cfg_file: str):
         "config": cfg_dict,
     }, result_file)
     logger.info(f"Results saved to {result_file}")
+
+    return {
+        "experiment": exp_name,
+        "metrics": metric_results,
+        "paths": {
+            "arrayD": arrayD_uri,
+            "arrayG": g_uris,
+            "arrayE": arrayE_uri,
+            "results_dir": str(results_dir),
+        },
+    }
+
+
+def run_pipeline(cfg_source: str | Dict[str, Any]):
+    if isinstance(cfg_source, (str, Path)):
+        cfg_dict = load_yaml(str(cfg_source))
+    else:
+        cfg_dict = cfg_source
+
+    logger = setup_logger()
+    return run_experiment(cfg_dict, logger=logger)
 
 
 if __name__ == "__main__":
