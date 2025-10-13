@@ -6,7 +6,13 @@ from ccpress.config import Config
 from ccpress.utils import setup_logger, path_size_bytes
 from ccpress.utils.yaml_io import load_yaml, save_yaml
 from ccpress.data import load_dat_as_memmap
-from ccpress.compression import TileDBStore, SVDCompressor, ErrorCorrector
+from ccpress.compression import (
+    TileDBStore,
+    SVDCompressor,
+    RandomizedSVDCompressor,
+    TuckerCompressor,
+    ErrorCorrector,
+)
 from ccpress.evaluation import compression_ratio, mse_psnr_streaming
 
 def run_pipeline(cfg_file: str):
@@ -44,30 +50,93 @@ def run_pipeline(cfg_file: str):
     logger.info(f"Stored arrayD → {arrayD_uri}")
 
     # === Step 3: Semantic compression (G) ===
-    if sem["algorithm"] == "svd":
-        compressor = SVDCompressor(rank=sem["rank"])
-        G = compressor.compress(src)
-        D_approx = compressor.decompress(G)
-        g_base_uri = cfg.make_arrayG_base(exp_name, "svd", rank=sem["rank"])
+    algo = sem["algorithm"].lower()
+    if algo == "svd":
+        rank = int(sem.get("rank", 50))
+        compressor = SVDCompressor(rank=rank)
+        g_base_uri = cfg.make_arrayG_base(exp_name, compressor.name,
+                                          rank=rank,
+                                          suffix=sem.get("suffix"))
+    elif algo in {"rsvd", "randomized_svd"}:
+        rank = int(sem.get("rank", 50))
+        oversampling = int(sem.get("oversampling", 10))
+        n_iter = int(sem.get("n_iter", 2))
+        compressor = RandomizedSVDCompressor(
+            rank=rank,
+            oversampling=oversampling,
+            n_iter=n_iter,
+            random_state=sem.get("random_state"),
+        )
+        suffix = sem.get("suffix")
+        if suffix is None:
+            suffix = f"os{oversampling}_it{n_iter}"
+        g_base_uri = cfg.make_arrayG_base(exp_name, compressor.name,
+                                          rank=rank, suffix=suffix)
+    elif algo == "tucker":
+        ranks = tuple(int(v) for v in sem.get("ranks", (20, 40, 40)))
+        compressor = TuckerCompressor(ranks=ranks)
+        suffix = sem.get("suffix")
+        if suffix is None:
+            suffix = "x".join(str(r) for r in ranks)
+        g_base_uri = cfg.make_arrayG_base(exp_name, compressor.name,
+                                          suffix=suffix)
     else:
         raise ValueError(f"Unknown algorithm: {sem['algorithm']}")
 
+    G = compressor.compress(src)
+    D_approx = compressor.decompress(G)
+
     # === Step 4: Error correction (E) ===
-    corrector = ErrorCorrector(epsilon=sem["epsilon"])
-    E = corrector.compute(src, D_approx)
-    D_corrected = D_approx + E
-    logger.info(f"Computed correction matrix E (ε={sem['epsilon']})")
+    ec_cfg = sem.get("error_correction", {"enable": True})
+    if ec_cfg.get("enable", True):
+        mode = ec_cfg.get("mode", "blockwise")
+        block_size = int(ec_cfg.get("block_size", 8))
+        dtype_str = ec_cfg.get("dtype", "float32")
+        dtype = np.dtype(dtype_str)
+
+        corrector = ErrorCorrector(
+            epsilon=sem["epsilon"],
+            mode=mode,
+            block_size=block_size,
+            dtype=dtype,
+        )
+        E = corrector.compute(src, D_approx)
+        D_corrected = D_approx + (
+            E.astype(D_approx.dtype) if E.dtype != D_approx.dtype else E
+        )
+        logger.info(f"Computed correction matrix E (ε={sem['epsilon']}, mode={mode})")
+    else:
+        logger.info("Skipping error correction (E disabled).")
+        E = np.zeros_like(src)
+        D_corrected = D_approx
+
 
     # === Step 5: Store G (U/S/Vt) & E ===
-    U, S, Vt = G
-    tile_map = {
-        "U":  None,
-        "S":  None,
-        "Vt": (min(256, Vt.shape[0]), min(8192, Vt.shape[1])),
-    }
+    tile_map = sem.get("tile_map")
+
+    if isinstance(tile_map, dict):
+        # YAML 里可能存的是 list，需要转 tuple / None
+        tile_map = {k: (tuple(v) if isinstance(v, (list, tuple)) else v)
+                    for k, v in tile_map.items()}
+
+    if isinstance(G, tuple):
+        # 兼容旧格式
+        parts = {name: arr for name, arr in zip(["U", "S", "Vt"], G)}
+    else:
+        parts = G
+
+    if tile_map is None and algo in {"svd", "rsvd", "randomized_svd"}:
+        Vt = parts.get("Vt") if isinstance(parts, dict) else None
+        if Vt is not None:
+            tile_map = {
+                "U": None,
+                "S": None,
+                "Vt": (min(256, Vt.shape[0]), min(8192, Vt.shape[1])),
+            }
+
     g_uris = TileDBStore.save_parts(
         base_uri=g_base_uri,
-        parts={"U": U, "S": S, "Vt": Vt},
+        parts=parts,
         codec=codec, level=level, tile_map=tile_map, overwrite=True
     )
 

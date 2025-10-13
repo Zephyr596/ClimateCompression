@@ -23,7 +23,8 @@ class BaseCompressor(ABC):
     def compress(self, data: np.ndarray, **kwargs) -> Any:
         """
         Perform compression on input data and return compressed representation G.
-        For example, G could be (U_r, S_r, V_r) for SVD.
+        For example, G could be a dictionary {"U": U_r, "S": S_r, "Vt": V_r}
+        for SVD or {"core": G, "U0": U0, ...} for Tucker.
         """
         raise NotImplementedError
 

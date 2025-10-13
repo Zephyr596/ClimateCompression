@@ -8,7 +8,7 @@ This project implements a comprehensive system for compressing Red Sea temperatu
 ## 🎯 Project Objectives
 
 - **Load** 3D climate data (T × X × Y temperature matrices) into TileDB arrays
-- **Compress** data using SVD decomposition with configurable rank reduction
+- **Compress** data using multiple low-rank approximations (classical SVD, randomized SVD, Tucker/HOSVD) for comparative studies inspired by Cappello et al.'s survey [2]
 - **Correct** approximation errors to satisfy strict relative error bounds (ε ≤ 1e-1 to 1e-4)
 - **Maximize** compression ratio ρ = sizeof(D) / (sizeof(G) + sizeof(E))
 - **Evaluate** performance with comprehensive metrics and visualizations
@@ -121,22 +121,24 @@ python import_tiledb.py --version 4k
 - 4K version: `(4000, 855, 1215)` - 4000 timesteps
 - Data type: `float32` (temperature in Kelvin)
 
-### SVD Compression
+### Semantic Compression Families
 
-Compress data using SVD decomposition with configurable rank reduction:
+Following the taxonomy in Cappello et al. [2], the pipeline supports multiple low-rank compressors for head-to-head comparison:
+
+1. **Deterministic SVD (baseline PCA)** – reshapes `(T,X,Y)` into `(T, X*Y)` and keeps the dominant singular triplets.
+2. **Randomized SVD** – accelerates SVD with randomized range finding, configurable oversampling, and power iterations for large grids.
+3. **Tucker / HOSVD** – applies higher-order SVD with per-mode ranks to capture anisotropic temporal/spatial structure.
 
 ```bash
-# Different compression levels
-python compress.py --rank-ratio 0.05  # High compression
-python compress.py --rank-ratio 0.10  # Balanced
-python compress.py --rank-ratio 0.20  # Lower compression
-```
+# Deterministic SVD with rank ratio 0.1
+python compress.py --rank-ratio 0.10
 
-**Compression Process**:
-1. Reshape 3D data `(T,X,Y)` → 2D `(T, X*Y)`
-2. SVD decomposition: `Data = U @ S @ Vh`
-3. Rank reduction: Keep top-k components
-4. Store `Ur`, `Sr`, `Vhr` in TileDB arrays
+# Randomized SVD with additional oversampling
+python compress.py --algorithm rsvd --rank-ratio 0.10 --oversampling 20 --n-iter 3
+
+# Tucker/HOSVD with explicit ranks per axis
+python compress.py --algorithm tucker --ranks 40 60 60
+```
 
 ### Error Correction
 
@@ -306,6 +308,7 @@ python -c "import tiledb; print(tiledb.version())"
 - TileDB Documentation: https://docs.tiledb.com/
 - SVD Theory: Golub & Van Loan, "Matrix Computations"
 - Climate Data: Red Sea Reanalysis (GAN-generated)
+- Scientific Compression Survey: S. Di et al., "A survey on error-bounded lossy compression for scientific datasets", 2024 [2]
 
 ## 👥 Team
 

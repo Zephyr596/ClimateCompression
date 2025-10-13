@@ -39,9 +39,15 @@ class Config:
         uri.parent.mkdir(parents=True, exist_ok=True)
         return str(uri)
 
-    def make_arrayG_base(self, exp_name: str, algo: str, rank: int | None = None) -> str:
+    def make_arrayG_base(self, exp_name: str, algo: str,
+                          rank: int | None = None,
+                          suffix: str | None = None) -> str:
         # 例：arrayG/svd_r50 作为基底，再由 save_parts 生成 *_U/_S/_Vt
-        tag = f"{algo}" + (f"_r{rank}" if rank is not None else "")
+        tag = f"{algo}"
+        if rank is not None:
+            tag += f"_r{rank}"
+        if suffix:
+            tag += f"_{suffix}"
         base = self.exp_root(exp_name) / "arrayG" / tag
         base.parent.mkdir(parents=True, exist_ok=True)
         return str(base)
