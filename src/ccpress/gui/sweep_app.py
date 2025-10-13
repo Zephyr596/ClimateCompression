@@ -1,12 +1,14 @@
 """Streamlit GUI for sweeping ClimateCompression experiments."""
 from __future__ import annotations
-import sys, os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+print("[DEBUG] Added to sys.path:", os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
 
 import pandas as pd
 import streamlit as st
@@ -151,12 +153,16 @@ def main():
             try:
                 result = run_experiment(run_cfg)
             except Exception as exc:
+                import traceback
+                err_msg = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+                st.error(f"{algo}@epsilon={epsilon} 失败：\n```\n{err_msg}\n```")
                 results.append({
                     "algorithm": algo,
                     "epsilon": epsilon,
                     "status": "failed",
                     "error": str(exc),
                 })
+
             else:
                 metrics = result.get("metrics", {})
                 row = {
