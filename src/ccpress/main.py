@@ -227,16 +227,12 @@ def run_experiment(cfg_dict: Dict[str, Any], *, logger=None) -> Dict[str, Any]:
     log_parts = []
 
     if "compression_ratio" in metrics:
-        raw_elems = int(np.prod(shape, dtype=np.int64))
-        raw_bytes = raw_elems * dtype.itemsize
+        size_D = path_size_bytes(arrayD_uri)
         size_G = sum(path_size_bytes(uri) for uri in g_uris.values())
         size_E = path_size_bytes(arrayE_uri)
-        compressed_bytes = size_G + size_E
-        rho = compression_ratio(raw_bytes, compressed_bytes)
+        rho = compression_ratio(size_D, size_G + size_E)
         metric_results["compression_ratio"] = float(rho)
-        log_parts.append(
-            f"ρ={rho:.3f} (raw={raw_bytes:,} B, compressed={compressed_bytes:,} B)"
-        )
+        log_parts.append(f"ρ={rho:.3f}")
 
     need_mse = any(m in {"mse", "psnr"} for m in metrics)
     if need_mse:
