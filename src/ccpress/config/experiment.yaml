@@ -25,6 +25,22 @@ semantic_compression:
       n_iter: 2
     tucker:
       ranks: [20, 40, 40]
+    sz:
+      mode: "abs"
+      error_bound: 1e-3
+    predictq:
+      mode: "value_rel"
+      error_bound: 5e-4
+    zfp:
+      block_size: 4
+      error_bound: 1e-3
+    wavelet3d:
+      levels: 3
+      error_bound: 1e-3
+    neural:
+      latent_dim: 64
+      epochs: 200
+      learning_rate: 1e-3
   # === E 的相关配置 ===
   error_correction:
     enable: true           # 是否启用E计算（关闭则只保留G）
@@ -36,5 +52,5 @@ evaluation:
   metrics: ["compression_ratio"]
 
 sweep:
-  algorithms: ["svd", "tucker"]
-  epsilons: [1e-4, 1e-3, 1e-2]
+  algorithms: ["svd", "rsvd", "tucker", "sz", "zfp", "wavelet3d", "neural"]
+  epsilons: [1e-4, 5e-4, 1e-3, 1e-2]

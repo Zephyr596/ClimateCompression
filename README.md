@@ -166,10 +166,10 @@ Comprehensive performance analysis:
 # Single configuration report
 python evaluate.py --mode single
 
-# Full experimental sweep
-python evaluate.py --mode experiment \
-    --epsilon 1e-1 1e-2 1e-3 1e-4 \
-    --rank-ratio 0.05 0.1 0.15 0.2
+# Full experimental sweep (CLI)
+PYTHONPATH=src python -m ccpress.sweep --config src/ccpress/config/experiment.yaml \
+    --algorithms svd rsvd tucker sz zfp wavelet3d neural \
+    --epsilons 1e-4 5e-4 1e-3 1e-2
 ```
 
 ## 📈 Expected Results

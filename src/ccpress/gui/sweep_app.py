@@ -1,21 +1,28 @@
 """Streamlit GUI for sweeping ClimateCompression experiments."""
 from __future__ import annotations
 
-from copy import deepcopy
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, List
-import sys, os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-print("[DEBUG] Added to sys.path:", os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+from typing import Iterable, List
 
+import sys
 
 import pandas as pd
 import streamlit as st
 
-from ccpress.config import Config
-from ccpress.main import run_experiment
-from ccpress.utils.yaml_io import load_yaml
+_ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.append(str(_ROOT))
+
+from ccpress.sweep import (
+    SWEEP_ALGORITHMS,
+    algorithm_label,
+    collect_results,
+    default_sweep_values,
+    load_config,
+    normalise_algorithm,
+    save_results,
+    sweep_runs,
+)
 
 
 def _parse_float_list(values: Iterable[str]) -> List[float]:
@@ -31,44 +38,6 @@ def _parse_float_list(values: Iterable[str]) -> List[float]:
     return parsed
 
 
-def _load_config(path: str | Path) -> Dict:
-    cfg_path = Path(path)
-    if not cfg_path.exists():
-        raise FileNotFoundError(f"配置文件不存在: {cfg_path}")
-    return load_yaml(str(cfg_path))
-
-
-def _default_sweep_values(cfg_dict: Dict) -> tuple[list[str], list[float]]:
-    sem = cfg_dict.get("semantic_compression", {})
-    sweep_cfg = cfg_dict.get("sweep", {})
-
-    available_algorithms = []
-    algo_cfg = sem.get("algorithms", {})
-    if isinstance(algo_cfg, dict):
-        available_algorithms = list(algo_cfg.keys())
-
-    default_algo = sem.get("algorithm")
-    if default_algo and default_algo not in available_algorithms:
-        available_algorithms.append(default_algo)
-
-    sweep_algos = sweep_cfg.get("algorithms", available_algorithms or ([default_algo] if default_algo else []))
-    sweep_eps = sweep_cfg.get("epsilons", [sem.get("epsilon", 1e-3)])
-
-    return list(dict.fromkeys(sweep_algos)), [float(e) for e in sweep_eps]
-
-
-def _save_results(df: pd.DataFrame, cfg_dict: Dict) -> Path:
-    cfg = Config()
-    exp_cfg = cfg_dict.get("experiment", {})
-    output_dir = exp_cfg.get("output_dir") or "results"
-    sweep_dir = Path(cfg.project_root) / output_dir / "sweeps"
-    sweep_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    csv_path = sweep_dir / f"sweep-{timestamp}.csv"
-    df.to_csv(csv_path, index=False)
-    return csv_path
-
-
 def main():
     st.set_page_config(page_title="ClimateCompression Sweep", layout="wide")
     st.title("ClimateCompression 实验 Sweep")
@@ -78,20 +47,33 @@ def main():
     cfg_path = st.sidebar.text_input("配置文件路径", value=default_cfg_path)
 
     try:
-        cfg_dict = _load_config(cfg_path)
+        cfg_dict = load_config(cfg_path)
     except FileNotFoundError as exc:
         st.error(str(exc))
         return
 
-    sem = cfg_dict.get("semantic_compression", {})
+    sem = cfg_dict.get("semantic_compression", {}) or {}
     algorithms_cfg = sem.get("algorithms", {}) if isinstance(sem, dict) else {}
-    available_algorithms = sorted(algorithms_cfg.keys())
-    default_algorithms, default_eps = _default_sweep_values(cfg_dict)
+
+    available_algorithms = []
+    for name in algorithms_cfg.keys():
+        norm = normalise_algorithm(name)
+        if norm and norm not in available_algorithms:
+            available_algorithms.append(norm)
+
+    default_algorithms, default_eps = default_sweep_values(cfg_dict)
+
+    all_algorithms: list[str] = []
+    for source in (default_algorithms, available_algorithms, list(SWEEP_ALGORITHMS.keys())):
+        for algo in source:
+            if algo and algo not in all_algorithms:
+                all_algorithms.append(algo)
 
     selected_algorithms = st.sidebar.multiselect(
         "选择压缩算法",
-        options=available_algorithms or default_algorithms,
-        default=default_algorithms or available_algorithms,
+        options=all_algorithms,
+        default=default_algorithms or all_algorithms,
+        format_func=lambda key: algorithm_label(key),
         help="从配置中可用的压缩算法中进行选择",
     )
 
@@ -134,56 +116,38 @@ def main():
 
     total_runs = len(selected_algorithms) * len(epsilon_values)
     progress = st.progress(0.0)
-    results: List[Dict] = []
     log_container = st.empty()
+    metrics = [m.lower() for m in selected_metrics]
 
-    for idx, algo in enumerate(selected_algorithms):
-        for jdx, epsilon in enumerate(epsilon_values):
-            run_idx = idx * len(epsilon_values) + jdx
-            progress.progress((run_idx) / total_runs)
+    def _update_progress(step: int, total: int, algo: str, epsilon: float, status: str, message: str | None):
+        progress.progress(step / total)
+        if status == "start":
+            log_container.info(
+                f"运行 {algorithm_label(algo)} @ epsilon={epsilon} ({step}/{total}) ..."
+            )
+        elif status == "failed" and message:
+            log_container.error(
+                f"{algorithm_label(algo)}@epsilon={epsilon} 失败:\n``\n{message}\n```"
+            )
 
-            run_cfg = deepcopy(cfg_dict)
-            run_cfg.setdefault("experiment", {}).pop("name", None)
-            run_cfg["semantic_compression"]["algorithm"] = algo
-            run_cfg["semantic_compression"]["epsilon"] = float(epsilon)
-            run_cfg.setdefault("evaluation", {})["metrics"] = selected_metrics
-
-            log_container.info(f"运行 {algo} @ epsilon={epsilon} ({run_idx + 1}/{total_runs}) ...")
-
-            try:
-                result = run_experiment(run_cfg)
-            except Exception as exc:
-                import traceback
-                err_msg = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-                st.error(f"{algo}@epsilon={epsilon} 失败：\n```\n{err_msg}\n```")
-                results.append({
-                    "algorithm": algo,
-                    "epsilon": epsilon,
-                    "status": "failed",
-                    "error": str(exc),
-                })
-
-            else:
-                metrics = result.get("metrics", {})
-                row = {
-                    "algorithm": algo,
-                    "epsilon": epsilon,
-                    "status": "ok",
-                }
-                for metric_name in selected_metrics:
-                    row[metric_name] = metrics.get(metric_name)
-                results.append(row)
-
-            progress.progress((run_idx + 1) / total_runs)
+    rows = list(
+        sweep_runs(
+            cfg_dict,
+            selected_algorithms,
+            epsilon_values,
+            metrics=metrics,
+            progress_callback=_update_progress,
+        )
+    )
 
     progress.empty()
     log_container.empty()
 
-    if not results:
+    if not rows:
         st.warning("没有可显示的结果。")
         return
 
-    df = pd.DataFrame(results)
+    df = collect_results(rows)
     st.write("### Sweep 结果")
     st.dataframe(df)
 
@@ -212,7 +176,7 @@ def main():
                 use_container_width=True,
             )
 
-    csv_path = _save_results(df, cfg_dict)
+    csv_path = save_results(df, cfg_dict)
     st.success(f"Sweep 结果已保存至 {csv_path}")
 
 
