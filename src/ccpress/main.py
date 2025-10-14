@@ -14,6 +14,10 @@ from ccpress.compression import (
     SVDCompressor,
     RandomizedSVDCompressor,
     TuckerCompressor,
+    SZCompressor,
+    ZFPTransformCompressor,
+    Wavelet3DCompressor,
+    NeuralAutoencoderCompressor,
     ErrorCorrector,
 )
 from ccpress.evaluation import compression_ratio, mse_psnr_streaming
@@ -150,6 +154,44 @@ def run_experiment(cfg_dict: Dict[str, Any], *, logger=None) -> Dict[str, Any]:
             suffix = "x".join(str(r) for r in ranks)
         g_base_uri = cfg.make_arrayG_base(exp_name, compressor.name,
                                           suffix=suffix)
+    elif algo in {"sz", "sz3", "predictq"}:
+        error_bound = float(algo_params.get("error_bound", sem.get("epsilon", 1e-3)))
+        mode = algo_params.get("mode", sem.get("mode", "abs"))
+        compressor = SZCompressor(error_bound=error_bound, mode=mode)
+        suffix = sem.get("suffix")
+        if suffix is None:
+            suffix = f"eps{_format_float(error_bound)}_{mode}"
+        g_base_uri = cfg.make_arrayG_base(exp_name, compressor.name, suffix=suffix)
+    elif algo in {"zfp", "zfp_like", "zfp-transform"}:
+        block = int(algo_params.get("block_size", sem.get("block_size", 4)))
+        error_bound = float(algo_params.get("error_bound", sem.get("epsilon", 1e-3)))
+        compressor = ZFPTransformCompressor(block_size=block, error_bound=error_bound)
+        suffix = sem.get("suffix")
+        if suffix is None:
+            suffix = f"b{block}_eps{_format_float(error_bound)}"
+        g_base_uri = cfg.make_arrayG_base(exp_name, compressor.name, suffix=suffix)
+    elif algo in {"wavelet", "wavelet3d"}:
+        levels = int(algo_params.get("levels", sem.get("levels", 2)))
+        error_bound = float(algo_params.get("error_bound", sem.get("epsilon", 1e-3)))
+        compressor = Wavelet3DCompressor(levels=levels, error_bound=error_bound)
+        suffix = sem.get("suffix")
+        if suffix is None:
+            suffix = f"L{levels}_eps{_format_float(error_bound)}"
+        g_base_uri = cfg.make_arrayG_base(exp_name, compressor.name, suffix=suffix)
+    elif algo in {"neural", "neural_autoencoder", "nn"}:
+        latent_dim = int(algo_params.get("latent_dim", sem.get("latent_dim", 64)))
+        epochs = int(algo_params.get("epochs", sem.get("epochs", 200)))
+        lr = float(algo_params.get("learning_rate", sem.get("learning_rate", 1e-3)))
+        compressor = NeuralAutoencoderCompressor(
+            latent_dim=latent_dim,
+            epochs=epochs,
+            learning_rate=lr,
+            device=sem.get("device"),
+        )
+        suffix = sem.get("suffix")
+        if suffix is None:
+            suffix = f"ld{latent_dim}_ep{epochs}"
+        g_base_uri = cfg.make_arrayG_base(exp_name, compressor.name, suffix=suffix)
     else:
         raise ValueError(f"Unknown algorithm: {sem['algorithm']}")
 
