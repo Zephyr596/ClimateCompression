@@ -30,6 +30,7 @@ from typing import Dict, Iterable, Tuple
 import numpy as np
 
 from .base import BaseCompressor
+from ..utils.array_codec import PackedArray, compress_int_array, decompress_int_array
 
 
 def _lorenzo_predict(recon: np.ndarray, idx: Tuple[int, int, int]) -> float:
@@ -134,13 +135,23 @@ class SZCompressor(BaseCompressor):
 
         quantised, recon = self._quantise(data, float(step))
         values, counts = _rle_encode(quantised.ravel())
+        values_packed = compress_int_array(values)
+        counts_packed = compress_int_array(counts)
 
         return {
             "shape": np.asarray(data.shape, dtype=np.int32),
             "dtype": np.asarray([data.dtype.str.encode("ascii")], dtype="S16"),
             "error_bound": np.asarray([bound], dtype=np.float32),
-            "rle_values": values,
-            "rle_counts": counts,
+            "rle_values": values_packed.data,
+            "rle_values_dtype": np.asarray(
+                [values_packed.dtype.encode("ascii")], dtype="S16"
+            ),
+            "rle_values_len": np.asarray([values_packed.length], dtype=np.int64),
+            "rle_counts": counts_packed.data,
+            "rle_counts_dtype": np.asarray(
+                [counts_packed.dtype.encode("ascii")], dtype="S16"
+            ),
+            "rle_counts_len": np.asarray([counts_packed.length], dtype=np.int64),
         }
 
     def decompress(self, compressed_data: Dict[str, np.ndarray], **kwargs) -> np.ndarray:
@@ -149,8 +160,19 @@ class SZCompressor(BaseCompressor):
         dtype = np.dtype(dtype_str)
         error_bound = float(compressed_data["error_bound"][0])
 
-        values = np.asarray(compressed_data["rle_values"], dtype=np.int32)
-        counts = np.asarray(compressed_data["rle_counts"], dtype=np.int32)
+        values_packed = PackedArray(
+            data=np.asarray(compressed_data["rle_values"], dtype=np.uint8),
+            dtype=compressed_data["rle_values_dtype"][0].decode("ascii"),
+            length=int(compressed_data["rle_values_len"][0]),
+        )
+        counts_packed = PackedArray(
+            data=np.asarray(compressed_data["rle_counts"], dtype=np.uint8),
+            dtype=compressed_data["rle_counts_dtype"][0].decode("ascii"),
+            length=int(compressed_data["rle_counts_len"][0]),
+        )
+
+        values = decompress_int_array(values_packed).astype(np.int32, copy=False)
+        counts = decompress_int_array(counts_packed).astype(np.int32, copy=False)
         quantised_stream = _rle_decode(values, counts)
 
         if quantised_stream.size != int(np.prod(shape)):

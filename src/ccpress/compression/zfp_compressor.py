@@ -17,6 +17,7 @@ from typing import Dict, Tuple
 import numpy as np
 
 from .base import BaseCompressor
+from ..utils.array_codec import PackedArray, compress_int_array, decompress_int_array
 
 
 def _haar_axis_transform(block: np.ndarray, axis: int) -> np.ndarray:
@@ -114,6 +115,7 @@ class ZFPTransformCompressor(BaseCompressor):
             quantised_blocks.append(q)
 
         quantised_arr = np.stack(quantised_blocks, axis=0)
+        packed = compress_int_array(quantised_arr)
 
         return {
             "shape": np.asarray(data.shape, dtype=np.int32),
@@ -121,7 +123,10 @@ class ZFPTransformCompressor(BaseCompressor):
             "pad": np.asarray(pad_width, dtype=np.int32),
             "block_size": np.asarray([self.block_size], dtype=np.int32),
             "error_bound": np.asarray([bound], dtype=np.float32),
-            "blocks": quantised_arr,
+            "blocks_shape": np.asarray(quantised_arr.shape, dtype=np.int32),
+            "blocks_dtype": np.asarray([packed.dtype.encode("ascii")], dtype="S16"),
+            "blocks_len": np.asarray([packed.length], dtype=np.int64),
+            "blocks": packed.data,
         }
 
     def decompress(self, compressed_data: Dict[str, np.ndarray], **kwargs) -> np.ndarray:
@@ -131,7 +136,15 @@ class ZFPTransformCompressor(BaseCompressor):
         pad_width = tuple(int(v) for v in compressed_data["pad"].astype(int))
         block_size = int(compressed_data["block_size"][0])
         error_bound = float(compressed_data["error_bound"][0])
-        quantised_blocks = np.asarray(compressed_data["blocks"], dtype=np.int32)
+        blocks_shape = tuple(int(v) for v in compressed_data["blocks_shape"].astype(int))
+        packed = PackedArray(
+            data=np.asarray(compressed_data["blocks"], dtype=np.uint8),
+            dtype=compressed_data["blocks_dtype"][0].decode("ascii"),
+            length=int(compressed_data["blocks_len"][0]),
+        )
+        quantised_blocks = (
+            decompress_int_array(packed).reshape(blocks_shape).astype(np.int32, copy=False)
+        )
 
         recon_blocks = []
         for block in quantised_blocks:
