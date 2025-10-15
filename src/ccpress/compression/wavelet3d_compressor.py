@@ -8,6 +8,7 @@ from typing import Dict, Tuple
 import numpy as np
 
 from .base import BaseCompressor
+from ..utils.array_codec import PackedArray, compress_int_array, decompress_int_array
 
 
 def _haar_step(volume: np.ndarray) -> np.ndarray:
@@ -90,6 +91,7 @@ class Wavelet3DCompressor(BaseCompressor):
         levels_used = len(level_shapes)
 
         quantised = np.round(coeff / bound).astype(np.int32)
+        packed = compress_int_array(quantised)
 
         return {
             "shape": np.asarray(data.shape, dtype=np.int32),
@@ -98,7 +100,10 @@ class Wavelet3DCompressor(BaseCompressor):
             "levels": np.asarray([levels_used], dtype=np.int32),
             "level_shapes": np.asarray(level_shapes, dtype=np.int32),
             "error_bound": np.asarray([bound], dtype=np.float32),
-            "coeff": quantised,
+            "coeff_shape": np.asarray(quantised.shape, dtype=np.int32),
+            "coeff_dtype": np.asarray([packed.dtype.encode("ascii")], dtype="S16"),
+            "coeff_len": np.asarray([packed.length], dtype=np.int64),
+            "coeff": packed.data,
         }
 
     def decompress(self, compressed_data: Dict[str, np.ndarray], **kwargs) -> np.ndarray:
@@ -108,7 +113,15 @@ class Wavelet3DCompressor(BaseCompressor):
         pad_width = tuple(int(v) for v in compressed_data["pad"].astype(int))
         levels = int(compressed_data["levels"][0])
         bound = float(compressed_data["error_bound"][0])
-        quantised = np.asarray(compressed_data["coeff"], dtype=np.int32)
+        coeff_shape = tuple(int(v) for v in compressed_data["coeff_shape"].astype(int))
+        packed = PackedArray(
+            data=np.asarray(compressed_data["coeff"], dtype=np.uint8),
+            dtype=compressed_data["coeff_dtype"][0].decode("ascii"),
+            length=int(compressed_data["coeff_len"][0]),
+        )
+        quantised = (
+            decompress_int_array(packed).reshape(coeff_shape).astype(np.int32, copy=False)
+        )
         level_shapes = np.asarray(compressed_data["level_shapes"], dtype=np.int32)
 
         coeff = quantised.astype(np.float64) * bound

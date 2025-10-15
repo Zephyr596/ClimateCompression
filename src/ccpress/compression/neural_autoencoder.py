@@ -57,7 +57,13 @@ class NeuralAutoencoderCompressor(BaseCompressor):
 
     def compress(self, data: np.ndarray, **kwargs) -> Dict[str, np.ndarray]:
         data = np.asarray(data, dtype=np.float32)
-        x = data.reshape(1, -1)
+        if data.ndim == 0:
+            raise ValueError("NeuralAutoencoderCompressor expects at least 1-D input")
+
+        if data.ndim == 1:
+            x = data.reshape(-1, 1)
+        else:
+            x = data.reshape(data.shape[0], -1)
         n_features = x.shape[1]
 
         latent_dim = int(kwargs.get("latent_dim", self.latent_dim))
