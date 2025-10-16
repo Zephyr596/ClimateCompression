@@ -155,7 +155,7 @@ def run_experiment(cfg_dict: Dict[str, Any], *, logger=None) -> Dict[str, Any]:
         g_base_uri = cfg.make_arrayG_base(exp_name, compressor.name,
                                           suffix=suffix)
     elif algo in {"sz", "sz3", "predictq"}:
-        error_bound = float(algo_params.get("error_bound", sem.get("epsilon", 1e-3)))
+        error_bound = float(sem.get("epsilon", 1e-3))
         mode = algo_params.get("mode", sem.get("mode", "abs"))
         compressor = SZCompressor(error_bound=error_bound, mode=mode)
         suffix = sem.get("suffix")
@@ -164,7 +164,7 @@ def run_experiment(cfg_dict: Dict[str, Any], *, logger=None) -> Dict[str, Any]:
         g_base_uri = cfg.make_arrayG_base(exp_name, compressor.name, suffix=suffix)
     elif algo in {"zfp", "zfp_like", "zfp-transform"}:
         block = int(algo_params.get("block_size", sem.get("block_size", 4)))
-        error_bound = float(algo_params.get("error_bound", sem.get("epsilon", 1e-3)))
+        error_bound = float(sem.get("epsilon", 1e-3))
         compressor = ZFPTransformCompressor(block_size=block, error_bound=error_bound)
         suffix = sem.get("suffix")
         if suffix is None:
@@ -172,7 +172,7 @@ def run_experiment(cfg_dict: Dict[str, Any], *, logger=None) -> Dict[str, Any]:
         g_base_uri = cfg.make_arrayG_base(exp_name, compressor.name, suffix=suffix)
     elif algo in {"wavelet", "wavelet3d"}:
         levels = int(algo_params.get("levels", sem.get("levels", 2)))
-        error_bound = float(algo_params.get("error_bound", sem.get("epsilon", 1e-3)))
+        error_bound = float(sem.get("epsilon", 1e-3))
         compressor = Wavelet3DCompressor(levels=levels, error_bound=error_bound)
         suffix = sem.get("suffix")
         if suffix is None:
@@ -200,7 +200,14 @@ def run_experiment(cfg_dict: Dict[str, Any], *, logger=None) -> Dict[str, Any]:
 
     # === Step 4: Error correction (E) ===
     ec_cfg = sem.get("error_correction", {"enable": True})
-    if ec_cfg.get("enable", True):
+    need_E = False
+
+    if algo in {"svd", "rsvd", "randomized_svd", "tucker", "neural", "neural_autoencoder"}:
+        need_E = ec_cfg.get("enable", True)
+    else:
+        need_E = False
+
+    if need_E:
         mode = ec_cfg.get("mode", "blockwise")
         block_size = int(ec_cfg.get("block_size", 8))
         dtype_str = ec_cfg.get("dtype", "float32")
@@ -218,9 +225,9 @@ def run_experiment(cfg_dict: Dict[str, Any], *, logger=None) -> Dict[str, Any]:
         )
         logger.info(f"Computed correction matrix E (ε={sem['epsilon']}, mode={mode})")
     else:
-        logger.info("Skipping error correction (E disabled).")
         E = np.zeros_like(src)
         D_corrected = D_approx
+        logger.info(f"Skipping E correction for algorithm '{algo}' (not needed).")
 
 
     # === Step 5: Store G (U/S/Vt) & E ===

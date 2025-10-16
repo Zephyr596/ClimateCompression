@@ -1,0 +1,77 @@
+algorithm,epsilon,status,compression_ratio,error
+svd,0.0001,ok,13.661488717923431,
+svd,0.0005,ok,13.661488717923431,
+svd,0.001,ok,13.661419827356063,
+svd,0.01,ok,16.97818327784882,
+rsvd,0.0001,ok,13.68607444626904,
+rsvd,0.0005,ok,13.676281758949418,
+rsvd,0.001,ok,13.677553050478156,
+rsvd,0.01,ok,16.356232227838067,
+tucker,0.0001,ok,41.588182108643096,
+tucker,0.0005,ok,41.588182108643096,
+tucker,0.001,ok,41.588182108643096,
+tucker,0.01,ok,70.68256657971772,
+sz,0.0001,ok,1.1102624822204192,
+sz,0.0005,ok,1.1102624822204192,
+sz,0.001,ok,1.1102624822204192,
+sz,0.01,ok,1.1102624822204192,
+zfp,0.0001,ok,1.5558957463415601,
+zfp,0.0005,ok,1.5558957463415601,
+zfp,0.001,ok,1.5558957463415601,
+zfp,0.01,ok,1.5558957463415601,
+wavelet3d,0.0001,ok,1.8819284852758709,
+wavelet3d,0.0005,ok,1.8819284852758709,
+wavelet3d,0.001,ok,1.8819284852758709,
+wavelet3d,0.01,ok,1.8819284852758709,
+neural,0.0001,failed,,"Traceback (most recent call last):
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/sweep.py"", line 242, in sweep_runs
+    result = run_experiment(run_cfg)
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/main.py"", line 198, in run_experiment
+    G = compressor.compress(src)
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/compression/neural_autoencoder.py"", line 69, in compress
+    model = _LinearAutoencoder(n_features, latent_dim).to(device)
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/compression/neural_autoencoder.py"", line 27, in __init__
+    self.encoder = nn.Linear(n_features, latent_dim)
+  File ""/home/zehua/miniconda3/envs/cs245/lib/python3.10/site-packages/torch/nn/modules/linear.py"", line 106, in __init__
+    torch.empty((out_features, in_features), **factory_kwargs)
+RuntimeError: [enforce fail at alloc_cpu.cpp:124] err == 0. DefaultCPUAllocator: can't allocate memory: you tried to allocate 132969600000 bytes. Error code 12 (Cannot allocate memory)
+"
+neural,0.0005,failed,,"Traceback (most recent call last):
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/sweep.py"", line 242, in sweep_runs
+    result = run_experiment(run_cfg)
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/main.py"", line 198, in run_experiment
+    G = compressor.compress(src)
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/compression/neural_autoencoder.py"", line 69, in compress
+    model = _LinearAutoencoder(n_features, latent_dim).to(device)
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/compression/neural_autoencoder.py"", line 27, in __init__
+    self.encoder = nn.Linear(n_features, latent_dim)
+  File ""/home/zehua/miniconda3/envs/cs245/lib/python3.10/site-packages/torch/nn/modules/linear.py"", line 106, in __init__
+    torch.empty((out_features, in_features), **factory_kwargs)
+RuntimeError: [enforce fail at alloc_cpu.cpp:124] err == 0. DefaultCPUAllocator: can't allocate memory: you tried to allocate 132969600000 bytes. Error code 12 (Cannot allocate memory)
+"
+neural,0.001,failed,,"Traceback (most recent call last):
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/sweep.py"", line 242, in sweep_runs
+    result = run_experiment(run_cfg)
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/main.py"", line 198, in run_experiment
+    G = compressor.compress(src)
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/compression/neural_autoencoder.py"", line 69, in compress
+    model = _LinearAutoencoder(n_features, latent_dim).to(device)
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/compression/neural_autoencoder.py"", line 27, in __init__
+    self.encoder = nn.Linear(n_features, latent_dim)
+  File ""/home/zehua/miniconda3/envs/cs245/lib/python3.10/site-packages/torch/nn/modules/linear.py"", line 106, in __init__
+    torch.empty((out_features, in_features), **factory_kwargs)
+RuntimeError: [enforce fail at alloc_cpu.cpp:124] err == 0. DefaultCPUAllocator: can't allocate memory: you tried to allocate 132969600000 bytes. Error code 12 (Cannot allocate memory)
+"
+neural,0.01,failed,,"Traceback (most recent call last):
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/sweep.py"", line 242, in sweep_runs
+    result = run_experiment(run_cfg)
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/main.py"", line 198, in run_experiment
+    G = compressor.compress(src)
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/compression/neural_autoencoder.py"", line 69, in compress
+    model = _LinearAutoencoder(n_features, latent_dim).to(device)
+  File ""/home/zehua/cs245/ClimateCompression/src/ccpress/compression/neural_autoencoder.py"", line 27, in __init__
+    self.encoder = nn.Linear(n_features, latent_dim)
+  File ""/home/zehua/miniconda3/envs/cs245/lib/python3.10/site-packages/torch/nn/modules/linear.py"", line 106, in __init__
+    torch.empty((out_features, in_features), **factory_kwargs)
+RuntimeError: [enforce fail at alloc_cpu.cpp:124] err == 0. DefaultCPUAllocator: can't allocate memory: you tried to allocate 132969600000 bytes. Error code 12 (Cannot allocate memory)
+"
